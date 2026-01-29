@@ -1,4 +1,5 @@
 This guide documents the final, working architecture for running Cuttlefish (Android) on a Linux host (Littlefoot) using a host-integrated Docker model. It captures the specific technical hurdles bypassed to achieve a working WebRTC display and successful APK installation.
+
 🏛️ 1. Architecture & System Integration
 
 Unlike standard "contained" Docker images, Cuttlefish requires deep integration with the host kernel to handle nested virtualization.
@@ -25,7 +26,7 @@ Cuttlefish will fail to boot if the host tools and the system image aren't perfe
 
 🖥️ 3. Graphics: The SwiftShader Pivot
 
-Passing a physical GPU (like an RTX PRO 4500) into a nested VM inside a Docker container is a primary point of failure for WebRTC display.
+Passing a physical GPU into a nested VM inside a Docker container is a primary point of failure for WebRTC display.
 
     The Fix: Use --gpu_mode=guest_swiftshader.
 
