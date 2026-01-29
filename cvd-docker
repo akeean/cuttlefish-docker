@@ -1,0 +1,64 @@
+#!/bin/bash
+CONTAINER_NAME="cuttlefish"
+IMAGE_NAME="cuttlefish-orchestration:latest"
+IMAGE_DIR="$HOME/cuttlefish_images"
+
+case "$1" in
+  start)
+    echo "🚀 Preparing host environment..."
+    sudo modprobe vsock vhost_vsock vhost_net vhci_hcd
+    # Force kill any local operators that might be squatting on ports
+    sudo pkill -9 operator 2>/dev/null
+    docker rm -f ${CONTAINER_NAME} 2>/dev/null
+
+    echo "📦 Creating Cuttlefish container..."
+    docker run -d --name ${CONTAINER_NAME} \
+      --privileged \
+      --ulimit nofile=65535:65535 \
+      --device /dev/kvm:/dev/kvm \
+      --device /dev/vsock:/dev/vsock \
+      --device /dev/vhost-vsock:/dev/vhost-vsock \
+      --device /dev/vhost-net:/dev/vhost-net \
+      --net host \
+      -v /sys/fs/cgroup:/sys/fs/cgroup:ro \
+      -v ${IMAGE_DIR}:/home/android_build \
+      ${IMAGE_NAME}
+
+    sleep 3
+    docker exec -u root ${CONTAINER_NAME} chmod 666 /dev/kvm /dev/vsock
+
+    echo "📲 Booting Android..."
+    docker exec -e HOME=/home/android_build -e TMPDIR=/home/android_build ${CONTAINER_NAME} \
+      /home/android_build/bin/launch_cvd \
+      --start_webrtc \
+      --webrtc_sig_server_port=8443 \
+      --gpu_mode=guest_swiftshader \
+      --noresume \
+      --report_anonymous_usage_stats=y \
+      --undefok=report_anonymous_usage_stats,webrtc_sig_server_port \
+      --daemon
+    ;;
+
+  stop)
+    echo "🛑 Stopping Cuttlefish..."
+    docker exec -e HOME=/home/android_build -e TMPDIR=/home/android_build ${CONTAINER_NAME} /home/android_build/bin/stop_cvd 2>/dev/null
+    docker stop ${CONTAINER_NAME}
+    sudo pkill -9 operator 2>/dev/null
+    ;;
+
+  clean)
+    echo "🧹 Wiping session data..."
+    sudo rm -rf ${IMAGE_DIR}/cuttlefish ${IMAGE_DIR}/cuttlefish_runtime ${IMAGE_DIR}/cf_avd_0 ${IMAGE_DIR}/cf_env_0
+    sudo find ${IMAGE_DIR} -type s -delete
+    echo "Done."
+    ;;
+
+  logs)
+    docker exec -it ${CONTAINER_NAME} tail -f /home/android_build/cuttlefish/instances/cvd-1/logs/launcher.log
+    ;;
+
+  *)
+    echo "Usage: $0 {start|stop|clean|logs}"
+    exit 1
+    ;;
+esac
