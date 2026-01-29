@@ -57,35 +57,51 @@ This project bypasses Docker's bridge networking. By using the host network stac
 
 Cuttlefish will fail to boot if the host tools and the system image aren't perfectly synced.
 
-    Navigate to ci.android.com.
+Navigate to:
 
-    Target: aosp_cf_x86_64_only_phone-userdebug.
+    ci.android.com.
 
-    The Pair: Download the Image Zip and the cvd-host_package.tar.gz from the same Build ID.
+Target: aosp_cf_x86_64_only_phone-userdebug.
 
-    Extraction: Extract both into ~/cuttlefish_images. This directory is mounted into the container as a persistent volume.
+The Pair: Download the Image Zip and the cvd-host_package.tar.gz from the same Build ID (pick a green build that had no errors).
+
+Extraction: Extract both into ~/cuttlefish_images. This directory is mounted into the container as a persistent volume.
+
+    ~/cuttlefish_images/
+    ├── bin/                   <-- From Host Package (contains launch_cvd, etc.)
+    ├── etc/                   <-- From Host Package
+    ├── lib64/                 <-- From Host Package
+    ├── metadata/              <-- From Host Package
+    ├── usr/                   <-- From Host Package
+    ├── boot.img               <-- From System Image Zip
+    ├── initrd.img             <-- From System Image Zip
+    ├── system.img             <-- From System Image Zip
+    ├── userdata.img           <-- From System Image Zip
+    ├── vendor.img             <-- From System Image Zip
+    ├── vbmeta.img             <-- From System Image Zip
+    └── ... (other .img and .json files from the Zip)
 
 # 📜 Phase 4: Script Usage & Commands
 
 Use the cvd-docker command to manage your daily sessions.
 
-    cvd-docker start:
+    cvd-docker start
 
-        Injects kernel modules and kills conflicting operator services.
+Injects kernel modules and kills conflicting operator services.
 
-        Launches a privileged container with SwiftShader (CPU-based rendering) to ensure the WebRTC display works regardless of your physical GPU drivers.
+Launches a privileged container with SwiftShader (CPU-based rendering) to ensure the WebRTC display works regardless of your physical GPU drivers.
 
-    cvd-docker stop:
+    cvd-docker stop
 
-        Executes a graceful stop_cvd inside the guest. Always use this instead of docker stop to avoid corrupting the virtual Android disk.
+Executes a graceful stop_cvd inside the guest. Always use this instead of docker stop to avoid corrupting the virtual Android disk.
 
-    cvd-docker clean:
+    cvd-docker clean
 
-        The "Nuke" Option. If a launch fails, run this to wipe stale Unix sockets (.sock), lock files, and runtime directories (cuttlefish_runtime) that prevent new sessions from starting.
+The "Nuke" Option. If a launch fails, run this to wipe stale Unix sockets (.sock), lock files, and runtime directories (cuttlefish_runtime) that prevent new sessions from starting.
 
-    cvd-docker logs:
+    cvd-docker logs
 
-        Streams the launcher log. Look for "VNC/WebRTC server started" to confirm a successful boot.
+Streams the launcher log. Look for "VNC/WebRTC server started" to confirm a successful boot.
 
 # 🖥️ Phase 5: WebRTC & Development Tunneling
 
@@ -93,7 +109,7 @@ Use the cvd-docker command to manage your daily sessions.
 
     URL: https://localhost:8443
 
-    Security: You must manually accept the self-signed certificate in your browser (Advanced -> Proceed).
+You must manually accept the self-signed certificate in your browser (Advanced -> Proceed).
 
 ## 2. ADB Connectivity
 
@@ -105,8 +121,10 @@ To make an app inside Cuttlefish talk to a development server on your host: adb 
 
 # 🛡️ Troubleshooting & Safety
 
-    Stale States: If you get "Cannot lock instance," run cvd-docker clean.
+Stale States: If you get "Cannot lock instance," run cvd-docker clean.
 
-    System Hangs: If the host behaves erratically after a crash, reboot the physical PC to reset the vsock kernel state.
+System Hangs: If the host behaves erratically after a crash, reboot the physical PC to reset the vsock kernel state.
 
-    Security: This setup uses --privileged and --net host. It is for Local Development Only. Do not expose ports 8443 or 6520 to the public internet.
+Security: This setup uses --privileged and --net host. It is for Local Development Only. 
+
+#### Do not expose ports 8443 or 6520 to the public internet.
