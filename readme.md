@@ -1,91 +1,110 @@
-This guide documents the final, working architecture for running Cuttlefish (Android) on a Linux host (Littlefoot) using a host-integrated Docker model. It captures the specific technical hurdles bypassed to achieve a working WebRTC display and successful APK installation.
+Cuttlefish in Docker: Complete Orchestration & Setup Guide
 
-🏛️ 1. Architecture & System Integration
+This project provides a complete framework for building and running Cuttlefish (Android Open Source Project) within a Docker container. It uses a Host-Integrated architecture optimized for Linux environments (like SFF PCs), leveraging the host's network stack and kernel modules to ensure stable WebRTC streaming and reliable nested virtualization.
 
-Unlike standard "contained" Docker images, Cuttlefish requires deep integration with the host kernel to handle nested virtualization.
+🛠️ Phase 1: Initial Installation & Build
 
-    Kernel Requirements: The host must have kvm enabled and specific vsock modules loaded.
+Before using the cvd-docker script, you must prepare the host and build the base container image.
 
-        Command: sudo modprobe vsock vhost_vsock vhost_net vhci_hcd
+1. Install Dependencies
 
-    Networking Strategy: We utilize --net host. This is the single most important choice. It allows the container to share the host's IP stack, bypassing the flaky Docker bridge which often breaks WebRTC signaling and creates "offline" ADB devices.
+Your host machine needs the standard Cuttlefish host tools and Docker:
+Bash
 
-    The Operator Conflict: On many systems, a local "operator" service may squat on ports. The script must force-kill this (sudo pkill -9 operator) to ensure the signaling server can bind to port 8443.
+sudo apt install -y git devscripts config-package-dev debhelper-compat golang curl
+git clone https://github.com/google/android-cuttlefish.git
+cd android-cuttlefish
+debuild -i -us -uc -b
+sudo dpkg -i ../*.deb
+sudo apt install -f
+sudo adduser $USER cvdnetwork
+sudo adduser $USER kvm
+# Reboot your machine after adding users
 
-📂 2. Artifact Sourcing (The "Build ID" Match)
+2. Build the Docker Image
+
+From the root of this repository, build the orchestration image:
+Bash
+
+docker build -t cuttlefish-orchestration .
+
+3. Install the Orchestration Script
+
+Move the cvd-docker script to your system path so you can call it from anywhere:
+Bash
+
+sudo mv cvd-docker /usr/local/bin/cvd-docker
+sudo chmod +x /usr/local/bin/cvd-docker
+
+🏛️ Phase 2: System Integration
+
+1. Kernel Module Requirements
+
+Cuttlefish requires direct kernel interaction. The script handles this, but your host must support:
+
+    vsock / vhost_vsock: For high-speed Guest-to-Host communication.
+
+    vhost_net: For optimized networking offloading.
+
+    vhci_hcd: For virtual USB redirection.
+
+2. Networking Strategy: --net host
+
+This project bypasses Docker's bridge networking. By using the host network stack, the container shares the host's IP. This is the only reliable way to ensure WebRTC signaling and media streams remain synchronized without NAT-related failures.
+
+📂 Phase 3: Sourcing System Images (The Build ID Rule)
 
 Cuttlefish will fail to boot if the host tools and the system image aren't perfectly synced.
 
-    Source: ci.android.com.
+    Navigate to ci.android.com.
 
     Target: aosp_cf_x86_64_only_phone-userdebug.
 
-    The Pair: You must download both the Image Zip and the cvd-host_package.tar.gz from the same Build ID.
+    The Pair: Download the Image Zip and the cvd-host_package.tar.gz from the same Build ID.
 
-    Extraction: Unzip the image into the same directory where you extracted the host package.
+    Extraction: Extract both into ~/cuttlefish_images. This directory is mounted into the container as a persistent volume.
 
-🖥️ 3. Graphics: The SwiftShader Pivot
+📜 Phase 4: Script Usage & Commands
 
-Passing a physical GPU into a nested VM inside a Docker container is a primary point of failure for WebRTC display.
+Use the cvd-docker command to manage your daily sessions.
 
-    The Fix: Use --gpu_mode=guest_swiftshader.
+    cvd-docker start:
 
-    Why: This forces CPU-based software rendering for the Android guest. It is slightly slower but guarantees that the WebRTC stream will actually initialize and display the UI regardless of host driver issues.
+        Injects kernel modules and kills conflicting operator services.
 
-🌐 4. WebRTC & Browser Interaction
+        Launches a privileged container with SwiftShader (CPU-based rendering) to ensure the WebRTC display works regardless of your physical GPU drivers.
 
-The display is accessed via a browser-based signaling server.
+    cvd-docker stop:
 
-    URL: https://localhost:8443 (The port must be explicitly set via --webrtc_sig_server_port=8443).
+        Executes a graceful stop_cvd inside the guest. Always use this instead of docker stop to avoid corrupting the virtual Android disk.
 
-    The "Double Security" Hazard:
+    cvd-docker clean:
 
-        The browser will flag the site as unsafe (self-signed cert). You must click Advanced -> Proceed.
+        The "Nuke" Option. If a launch fails, run this to wipe stale Unix sockets (.sock), lock files, and runtime directories (cuttlefish_runtime) that prevent new sessions from starting.
 
-        The signaling server may require a second "Accept" within the UI to start the stream.
+    cvd-docker logs:
 
-    Input Latency: If the WebRTC mouse/keyboard feels unresponsive, use the adb shell input command via the host terminal instead.
+        Streams the launcher log. Look for "VNC/WebRTC server started" to confirm a successful boot.
 
-📱 5. ADB Connectivity & APK Deployment
+🖥️ Phase 5: WebRTC & Development Tunneling
 
-Because of the host networking and virtualized nature, ADB often behaves erratically.
+1. Accessing the UI
 
-    The Serial Trap: ADB may see 127.0.0.1:6520 and localhost:6520 simultaneously.
+    URL: https://localhost:8443
 
-        The Fix: Always connect and target explicitly: adb connect localhost:6520 followed by adb -s localhost:6520 <command>.
+    Security: You must manually accept the self-signed certificate in your browser (Advanced -> Proceed).
 
-    Installing APKs:
+2. ADB Connectivity
 
-        Ensure the device is device status in adb devices.
+Because of the host networking model, ADB may see duplicate serials. Always target explicitly: adb -s localhost:6520 [command]
 
-        Run: adb -s localhost:6520 install your_app.apk.
+3. The Expo/Metro Tunnel
 
-        If it hangs, check cvd-docker logs to ensure the adbd service inside the guest hasn't crashed.
+To make an app inside Cuttlefish talk to a development server on your host: adb -s localhost:6520 reverse tcp:8081 tcp:8081
+🛡️ Troubleshooting & Safety
 
-🛠️ 6. Troubleshooting & Session Hygiene
+    Stale States: If you get "Cannot lock instance," run cvd-docker clean.
 
-Cuttlefish creates "sockets" and "runtime files" on the host disk that do not disappear when the container stops. This prevents subsequent boots.
+    System Hangs: If the host behaves erratically after a crash, reboot the physical PC to reset the vsock kernel state.
 
-    The "Clean" Protocol: Before every fresh start, you must wipe the runtime directories:
-
-        rm -rf ~/cuttlefish_images/cuttlefish_runtime
-
-        rm -rf ~/cuttlefish_images/cf_avd_0
-
-        Socket Cleanup: find ~/cuttlefish_images -type s -delete
-
-    Permission Denied: If launch_cvd fails to access /dev/kvm inside the container, the script must run a root chmod 666 /dev/kvm /dev/vsock immediately after docker run.
-
-🚀 Summary of the "Working Path"
-
-    Host: Load kernel modules + Kill conflicting operators.
-
-    Docker: Launch with --privileged and --net host.
-
-    Guest: Boot with guest_swiftshader and daemon mode.
-
-    Display: Access via HTTPS on port 8443.
-
-    Tunnel: (For Expo) adb reverse tcp:8081 tcp:8081.
-
-Would you like me to help you draft the README.md for that GitHub repository so others can reproduce this Littlefoot setup?
+    Security: This setup uses --privileged and --net host. It is for Local Development Only. Do not expose ports 8443 or 6520 to the public internet.
